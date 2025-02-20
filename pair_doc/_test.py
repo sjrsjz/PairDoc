@@ -1,12 +1,31 @@
-from .lexer import PairDocTokenizer, PairDocTokenType
+from .lexer import PairDocTokenizer
 from .ast import Gather, PairDocASTParser
 from .html_builder import build_content, build_html
 def test():
     test_doc = """
-    ![func1 := (A:=1) -> {#A}];
+    #!var1 := "Hello" // This is a comment.
 
-    #func1()
+    #!var2 := "Word!" /* This is a block comment. */
+    
+    #!var2 = "World!"
+    
+    #h1{This is a test document.} #n
+    
+    #var1 #var2 #n
+
+    #span['style="color:' + red + '"']{
+        "This is a red text."
+    }
+
+    #---
+
+    #!var3 := b{
+        "This is a bold text."
+    }
+    #var3
     """
+
+
     tokenizer = PairDocTokenizer()
     tokens = tokenizer.parse(test_doc)
 
@@ -14,7 +33,7 @@ def test():
     gathered = gather.gather()
 
     parser = PairDocASTParser(gathered)
-    ast = parser.parse()
+    ast = parser.parse_doc()
     print(ast)
     content = build_content(ast)
     print(content)
