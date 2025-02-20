@@ -10,6 +10,9 @@ class ContentTypes(enum.Enum):
     STYLE = 2
     BLOCK = 3
     FUNCTION = 4
+    TUPLE = 5
+    KEYVALUE = 6
+    NUMBER = 7
 
 
 class Content:
@@ -23,7 +26,16 @@ class Content:
             self.content = content
     def __eq__(self, value):
         return self.content == value.content
-    
+    def __add__(self, value):
+        if isinstance(self.content, list):
+            self.content.append(value)
+            return self
+        if self.content_type == ContentTypes.TEXT and value.content_type == ContentTypes.TEXT:
+            return Content(ContentTypes.TEXT, self.content + value.content)
+        if self.content_type == ContentTypes.BLOCK:
+            self.content.append(value)
+            return self
+        raise ValueError("Cannot add")
     def __str__(self):
         if isinstance(self.content, list):
             return f'{self.content_type} {str([str(c) for c in self.content])}'
@@ -96,6 +108,8 @@ def build_content(ast, context_vars:Context = None)->str:
 
         if ast.node_type == PairDocASTNodeTypes.TEXT:
             return Content(ContentTypes.TEXT, ast.children)
+        if ast.node_type == PairDocASTNodeTypes.NUMBER:
+            return Content(ContentTypes.NUMBER, ast.children)
         if ast.node_type == PairDocASTNodeTypes.VARIABLE:
             return _get_variable(ast.children, context_vars=context_vars)
         if ast.node_type == PairDocASTNodeTypes.UNFUNCTIONAL:
@@ -107,7 +121,6 @@ def build_content(ast, context_vars:Context = None)->str:
             k = key.children
             v = build_content(value, context_vars=context_vars)
             context_vars.let(k, v)
-            print("let", k, "=", v)
             return v
         if ast.node_type == PairDocASTNodeTypes.NEVERRETURN:
             build_content(ast.children, context_vars=context_vars)
@@ -152,7 +165,44 @@ def build_content(ast, context_vars:Context = None)->str:
                 return left + right
             if op == '-':
                 return left - right
+            if op == '[]':
+                if left.content_type == ContentTypes.TUPLE:
+                    return left.content[int(right.content)]
+                if left.content_type == ContentTypes.TEXT:
+                    return Content(ContentTypes.TEXT, left.content[int(right.content)])
+                raise ValueError("Cannot use [] on non-tuple or non-text")
+            if op == '.':
+                if left.content_type == ContentTypes.TUPLE:
+                    for c in left.content:
+                        if not c.content_type == ContentTypes.KEYVALUE:
+                            raise ValueError("Not a key-value pair")
+                        if c.content[0].content == right.content:
+                            return c.content[1]
+                    raise ValueError("Key not found: " + right.content)
+                if left.content_type == ContentTypes.KEYVALUE:
+                    if right.content_type != ContentTypes.TEXT:
+                        raise ValueError("Cannot use non-text key")
+                    if right.content == 'key':
+                        return left.content[0]
+                    if right.content == 'value':
+                        return left.content[1]
+                    raise ValueError("Unknown key: " + right.content)
+                if left.content_type == ContentTypes.TEXT:
+                    if right.content_type != ContentTypes.NUMBER:
+                        raise ValueError("Cannot use non-number index for text")
+                    return Content(ContentTypes.TEXT, left.content[int(right.content)])
             raise ValueError("Unknown operation")
+        if ast.node_type == PairDocASTNodeTypes.TUPLE:
+            result = [build_content(c, context_vars=context_vars) for c in ast.children]
+            result = [c for c in result if c is not None] # 去掉None
+            return Content(ContentTypes.TUPLE, result)
+        if ast.node_type == PairDocASTNodeTypes.NONE:
+            return None
+        if ast.node_type == PairDocASTNodeTypes.KEYVAL:
+            key, value = ast.children
+            key = build_content(key, context_vars=context_vars)
+            value = build_content(value, context_vars=context_vars)
+            return Content(ContentTypes.KEYVALUE, [key, value])
         raise ValueError("Unknown AST type")
     
     return _build(ast)
@@ -172,4 +222,13 @@ def build_html(content:Content)->str:
         return f'<{style}>{children}</{style}>'
     if content.content_type == ContentTypes.BLOCK:
         return ' '.join([build_html(c) for c in content.content])
+    if content.content_type == ContentTypes.TUPLE:
+        return "(" + ', '.join([build_html(c) for c in content.content]) + ")"
+    if content.content_type == ContentTypes.KEYVALUE:
+        key, value = content.content
+        key = build_html(key)
+        value = build_html(value)
+        return f'{key}: {value}'
+    if content.content_type == ContentTypes.NUMBER:
+        return str(content.content)
     raise ValueError("Unknown content type")

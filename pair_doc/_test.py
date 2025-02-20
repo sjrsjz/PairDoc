@@ -3,26 +3,39 @@ from .ast import Gather, PairDocASTParser
 from .html_builder import build_content, build_html
 def test():
     test_doc = """
-    #!var1 := "Hello" // This is a comment.
+    #!var0 := b{我是奶龙}
 
-    #!var2 := "Word!" /* This is a block comment. */
+    #var1 := (
+        A:1,
+        B:(
+            C:span['style="color:orange"']{
+                "我才是奶龙"
+            },
+            D:(114,514,1919810)
+        )
+    ) #n
     
-    #!var2 = "World!"
+    #var2 := var1.B #n
+
+    #奶龙 := var0
+    #(var1.B).C #n
+
+    #span['style="color:red"']{
+        #"114514" 的第4位是 #b{#"114514".(3)}
+    } #n
+
+    #(var1.B).D[2] #n
+
+    #k_v := key1:("哦~", "今夜星光闪闪") #n
+    k_v的键名是 #k_v.key #t
+    k_v的键值是 #k_v.value
+
+    '''
+    <div style="color:orange">
+        我才是奶龙
+    </div>    
+    '''
     
-    #h1{This is a test document.} #n
-    
-    #var1 #var2 #n
-
-    #span['style="color:' + red + '"']{
-        "This is a red text."
-    }
-
-    #---
-
-    #!var3 := b{
-        "This is a bold text."
-    }
-    #var3
     """
 
 
