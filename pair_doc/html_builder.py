@@ -12,7 +12,8 @@ class ContentTypes(enum.Enum):
     FUNCTION = 4
     TUPLE = 5
     KEYVALUE = 6
-    NUMBER = 7
+    INT = 7
+    FLOAT = 8
 
 
 class Content:
@@ -35,10 +36,13 @@ class Content:
         if self.content_type == ContentTypes.BLOCK:
             self.content.append(value)
             return self
+        if self.content_type == ContentTypes.TUPLE:
+            self.content.append(value)
+            return self
+        if self.content_type == ContentTypes.INT and value.content_type == ContentTypes.INT:
+            return Content(ContentTypes.INT, self.content + value.content)
         raise ValueError("Cannot add")
     def __str__(self):
-        if isinstance(self.content, list):
-            return f'{self.content_type} {str([str(c) for c in self.content])}'
         return f'{self.content_type} {str(self.content)}'
     def __repr__(self):
         return self.__str__()
@@ -68,6 +72,11 @@ class Context:
         if self.super_context is not None:
             return self.super_context.get(key)
         return None
+    
+    def copy(self):
+        new_context = Context(self.super_context)
+        new_context.vars = self.vars.copy()
+        return new_context
 
 
 def _is_text(token, text):
@@ -109,7 +118,10 @@ def build_content(ast, context_vars:Context = None)->str:
         if ast.node_type == PairDocASTNodeTypes.TEXT:
             return Content(ContentTypes.TEXT, ast.children)
         if ast.node_type == PairDocASTNodeTypes.NUMBER:
-            return Content(ContentTypes.NUMBER, ast.children)
+            if '.' in ast.children or 'e' in ast.children:
+                return Content(ContentTypes.FLOAT, float(ast.children))
+            else:
+                return Content(ContentTypes.INT, int(ast.children))
         if ast.node_type == PairDocASTNodeTypes.VARIABLE:
             return _get_variable(ast.children, context_vars=context_vars)
         if ast.node_type == PairDocASTNodeTypes.UNFUNCTIONAL:
@@ -150,12 +162,12 @@ def build_content(ast, context_vars:Context = None)->str:
             func = _unwrap_block(build_content(func, context_vars=context_vars))
             if func.content_type != ContentTypes.FUNCTION:
                 raise ValueError("Not a function")
+            
+            print(f"Executing function: <{func}> with {args}")
+
             context, func_args, body = func.content
             args = build_content(args, context_vars=context_vars)
-            #context.let(func_args, args)
-            print(body)
             result = build_content(body, context_vars=context)
-            print(result)
             return result
         if ast.node_type == PairDocASTNodeTypes.OPERATION:
             left, op, right = ast.children
@@ -188,10 +200,11 @@ def build_content(ast, context_vars:Context = None)->str:
                         return left.content[1]
                     raise ValueError("Unknown key: " + right.content)
                 if left.content_type == ContentTypes.TEXT:
-                    if right.content_type != ContentTypes.NUMBER:
+                    if right.content_type != ContentTypes.INT:
                         raise ValueError("Cannot use non-number index for text")
                     return Content(ContentTypes.TEXT, left.content[int(right.content)])
-            raise ValueError("Unknown operation")
+                raise ValueError("Cannot use . on non-tuple or non-text")
+            raise ValueError("Unknown operation: " + op)
         if ast.node_type == PairDocASTNodeTypes.TUPLE:
             result = [build_content(c, context_vars=context_vars) for c in ast.children]
             result = [c for c in result if c is not None] # 去掉None
@@ -229,6 +242,11 @@ def build_html(content:Content)->str:
         key = build_html(key)
         value = build_html(value)
         return f'{key}: {value}'
-    if content.content_type == ContentTypes.NUMBER:
+    if content.content_type == ContentTypes.INT:
         return str(content.content)
+    if content.content_type == ContentTypes.FLOAT:
+        return str(content.content)
+    if content.content_type == ContentTypes.FUNCTION:
+        context, args, body = content.content
+        return f"{build_html(args)} -> {{{body}}}"
     raise ValueError("Unknown content type")

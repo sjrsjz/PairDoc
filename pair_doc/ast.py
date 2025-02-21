@@ -155,7 +155,7 @@ class PairDocASTNode:
         self.children = children
 
     def __str__(self):
-        return f'{self.node_type} {self.children}'
+        return f'{self.node_type.name} {self.children}'
     def __repr__(self):
         return self.__str__()
 
@@ -349,7 +349,7 @@ class PairDocOperatorLevel1:
                 if not node:
                     return None, 0
                 if node_offset != len(left):
-                    raise Exception("Invalid separator: Left side can't be fully matched: ", left)
+                    return None, 0
                 operation = self.token_list[start_idx + offset][0]['token']
                 offset += 1
                 last_offset = offset
@@ -393,26 +393,22 @@ class PairDocFunctionKeyVal:
 
 @node_matcher.register(priority=4)
 class PairDocFunctionDef:
-    # 匹配 xxx -> xxx
+    # 匹配 (xxx) -> {xxx}
     def __init__(self, token_list):
         self.token_list = token_list
     def match(self, start_idx):
         if start_idx + 2 >= len(self.token_list):
             return None, 0
-        if not _is_to(self.token_list[start_idx+1]):
+        if not _is_tuple(self.token_list[start_idx]) or not _is_to(self.token_list[start_idx+1]) or not _is_doc(self.token_list[start_idx+2]):
             return None, 0
         
-        left = Gather(self.token_list[start_idx]).gather()
-
-        right_guess, offset = node_matcher.match(self.token_list, start_idx + 2)
-
-        left_node, left_offset = node_matcher.match(left, 0)
+        left_node, left_offset = node_matcher.match(Gather(_unwrap_tuple(self.token_list[start_idx])).gather(), 0)
         if not left_node:
             return None, 0
-        if left_offset != len(left):
-            raise Exception("Invalid function defination: Left side can't be fully matched: ", left)
-        right_node = right_guess
-        return PairDocASTNode(PairDocASTNodeTypes.FUNCTIONDEF, [left_node, right_node]), offset + 2
+        right_node = PairDocASTParser(Gather(_unwrap_doc(self.token_list[start_idx+2])).gather()).parse_doc()
+        if not right_node:
+            return None, 0
+        return PairDocASTNode(PairDocASTNodeTypes.FUNCTIONDEF, [left_node, right_node]), 3
 
 @node_matcher.register(priority=4)
 class PairDocStyle:
@@ -452,76 +448,93 @@ class PairDocStyle:
             return PairDocASTNode(PairDocASTNodeTypes.STYLE, [left_node, None, body_node]), 2
 
 @node_matcher.register(priority=3)
-class PairDocIndex:
-    # 匹配 xxx[xxx]
+class PairDocMemberAccess:
+    """匹配成员访问操作：xxx[xxx] 和 xxx.xxx"""
     def __init__(self, token_list):
         self.token_list = token_list
+
     def match(self, start_idx):
-        # 向后匹配，直到匹配到[]
+        # 尝试匹配 [] 或 . 或 () 访问操作
         offset = 0
-        left = []
-        index = []
-        last_offset = None
+        access_points = []  # [(offset, type)] type: '[]' 或 '.'
         while start_idx + offset < len(self.token_list):
             if _is_pair(self.token_list[start_idx + offset]):
-                index = Gather(_unwrap_pair(self.token_list[start_idx + offset])).gather()
+                access_points.append((offset, '[]'))
                 offset += 1
-                last_offset = offset
-                break
+            elif _is_symbol(self.token_list[start_idx + offset], '.'):
+                access_points.append((offset, '.'))
+                offset += 1
+            elif _is_tuple(self.token_list[start_idx + offset]):
+                access_points.append((offset, '()'))
+                offset += 1
             elif _is_sharp(self.token_list[start_idx + offset]):
                 break
             else:
-                left.append(self.token_list[start_idx + offset])
                 offset += 1
 
-        if last_offset is None:
-            return None, 0
-        left_node, left_offset = node_matcher.match(left, 0)
-        if not left_node:
-            return None, 0
-        if len(left) != left_offset:
-            raise Exception("Invalid index: Left side can't be fully matched: ", left)
-        node, node_offset = node_matcher.match(index, 0)
-        if not node:
-            return None, 0
-        return PairDocASTNode(PairDocASTNodeTypes.OPERATION, [left_node, '[]', node]), last_offset
-            
-@node_matcher.register(priority=2)
-class PairDocGetAttr:
-    # 匹配 xxx.xxx
-    def __init__(self, token_list):
-        self.token_list = token_list
-    def match(self, start_idx):
-        # 向后匹配，直到匹配到.
-        offset = 0
-        left = []
-        attr = []
-        last_offset = None
-        while start_idx + offset < len(self.token_list):
-            if _is_symbol(self.token_list[start_idx + offset], '.'):               
-                offset += 1
-                last_offset = offset
-                break
-            elif _is_sharp(self.token_list[start_idx + offset]):
-                break
-            else:
-                left.append(self.token_list[start_idx + offset])
-                offset += 1
-
-        if last_offset is None:
-            return None, 0
-        left_node, left_offset = node_matcher.match(left, 0)
-        if not left_node:
-            return None, 0
-        if len(left) != left_offset:
-            raise Exception("Invalid get attribute: Left side can't be fully matched: ", left)        
-
-        attr_guess, attr_offset = node_matcher.match(self.token_list, start_idx + last_offset)
-        if not attr_guess:
+        if len(access_points) == 0 or access_points[0][0] == 0:  # 没有匹配到任何访问操作
             return None, 0
         
-        return PairDocASTNode(PairDocASTNodeTypes.OPERATION, [left_node, '.', attr_guess]), last_offset + attr_offset
+        # 寻找最长的有效匹配
+        idx = 0
+        while idx < len(access_points):
+            test_node, test_offset = node_matcher.match(
+                self.token_list[start_idx:start_idx + access_points[idx][0]], 
+                0
+            )
+            if not test_node:
+                return None, 0
+            if test_offset < access_points[idx][0]:
+                break
+            idx += 1
 
+        idx -= 1
+        if idx < 0:
+            return None, 0
+
+        # 处理左侧表达式
+        left = self.token_list[start_idx:start_idx + access_points[idx][0]]
+        left_node, left_offset = node_matcher.match(left, 0)
+        if not left_node or len(left) != left_offset:
+            return None, 0
+
+        access_type = access_points[idx][1]
+        if access_type == '[]':
+            # 处理索引访问
+            index = Gather(_unwrap_pair(self.token_list[start_idx + access_points[idx][0]])).gather()
+            index_node, index_offset = node_matcher.match(index, 0)
+            if not index_node or index_offset != len(index):
+                return None, 0
+            right_node = index_node
+        elif access_type == '()':
+            # 处理函数调用
+            args = Gather(_unwrap_tuple(self.token_list[start_idx + access_points[idx][0]])).gather()
+            args_node, args_offset = node_matcher.match(args, 0)
+            if not args_node or args_offset != len(args):
+                return None, 0
+            right_node = args_node
+        else:  # access_type == '.'
+            # 处理属性访问
+            right_node, right_offset = node_matcher.match(
+                self.token_list, 
+                start_idx + access_points[idx][0] + 1
+            )
+            if not right_node:
+                return None, 0
+
+        if access_type == '()':
+            return PairDocASTNode(
+                PairDocASTNodeTypes.FUNCTIONCALL, 
+                [left_node, right_node]
+            ), access_points[idx][0] + 1
+        else:
+            return (
+                PairDocASTNode(
+                    PairDocASTNodeTypes.OPERATION, 
+                    [left_node, access_type, right_node]
+                ),
+                access_points[idx][0] + (1 if access_type in ('[]', ) else right_offset + 1)
+            )
 @node_matcher.register(priority=1)
 class PairDocVariable:
     # 匹配变量
