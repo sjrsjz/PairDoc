@@ -95,6 +95,8 @@ def _get_variable(token, context_vars:Context = None):
         return Content(ContentTypes.TEXT, '&nbsp;')
     if _is_text(token, '@linebreak'): # 分割线
         return Content(ContentTypes.TEXT, '<hr>')
+    if _is_text(token, '$'):
+        return context_vars.get('__args__')
     return Content(ContentTypes.TEXT, token)
 
 def _unwrap_block(content:Content):
@@ -154,20 +156,49 @@ def build_content(ast, context_vars:Context = None)->str:
             return result[-1]
         if ast.node_type == PairDocASTNodeTypes.FUNCTIONDEF:
             args, body = ast.children
-            context_copy = context_vars.copy()
-            args = build_content(args, context_vars=context_copy) # TODO: 修正这里的逻辑
-            return Content(ContentTypes.FUNCTION, [context_copy, args, body])
+            args = build_content(args, context_vars=context_vars)
+            return Content(ContentTypes.FUNCTION, [context_vars, args, body])
         if ast.node_type == PairDocASTNodeTypes.FUNCTIONCALL:
             func, args = ast.children
             func = _unwrap_block(build_content(func, context_vars=context_vars))
             if func.content_type != ContentTypes.FUNCTION:
                 raise ValueError("Not a function")
             
-            print(f"Executing function: <{func}> with {args}")
+            args = build_content(args, context_vars=context_vars)
+            #print(f"Executing function: <{func}> with {args}")
 
             context, func_args, body = func.content
-            args = build_content(args, context_vars=context_vars)
-            result = build_content(body, context_vars=context)
+
+            #遍历参数，将参数赋值，有两种情况，一种是直接赋值，一种是key-value赋值
+            #先处理key-value赋值，然后将剩下的参数按顺序赋值
+            key_values = [c for c in args.content if c.content_type == ContentTypes.KEYVALUE]
+            non_key_values = [c for c in args.content if c.content_type != ContentTypes.KEYVALUE]
+
+            arg_map = {x.content[0].content: x.content[1] for x in (func_args.content)}
+            default_arg_map_is_used = {x.content[0].content: False for x in (func_args.content)}
+
+
+            for kv in key_values:
+                key, value = kv.content
+                arg_map[key.content] = value
+                if key.content in arg_map:
+                    default_arg_map_is_used[key.content] = True
+            for i, v in enumerate(non_key_values):
+                if i >= len(func_args.content):
+                    raise ValueError("Too many arguments")
+                # 查找第一个未使用的默认参数
+                for k, used in default_arg_map_is_used.items():
+                    if not used:
+                        arg_map[k] = v
+                        default_arg_map_is_used[k] = True
+                        break
+                
+
+            new_context = Context(context)
+            for k, v in arg_map.items():
+                new_context.let(k, v)
+
+            result = build_content(body, context_vars=new_context)
             return result
         if ast.node_type == PairDocASTNodeTypes.OPERATION:
             left, op, right = ast.children

@@ -2,54 +2,32 @@ from .lexer import PairDocTokenizer
 from .ast import Gather, PairDocASTParser
 from .html_builder import build_content, build_html
 def test():
-    test_doc = """
-    #!var0 := b{我是奶龙}
-
-    #var1 := (
-        A:1,
-        B:(
-            C:span['style="color:orange"']{
-                "我才是奶龙"
-            },
-            D:(114,514,1919810)
-        )
-    ) #n
-    
-    #var2 := var1.B #n
-
-    #奶龙 := var0
-    #var1[1].value.C #n
-
-    #span['style="color:red"']{
-        #"114514" 的第4位是 #b{#"114514".(3)}
-    } #n
-
-    #var1.B.D[2] #n
-
-    #k_v := key1:("哦~", "今夜星光闪闪") #n
-    k_v的键名是 #k_v.key #t
-    k_v的键值是 #k_v.value
-
-    '''
-    <div style="color:orange">
-        我才是奶龙
-    </div>    
-    '''
-
-    #mat4x4 := (
-        data: (
-            (1, 2, 3, 4),
-            (5, 6, 7, 8),
-            (9, 10, 11, 12),
-            (13, 14, 15, 16)
-        ),
-        dim: (4, 4)
-    ) #n
-
-    #mat4x4.("da" + "ta")[2][3]
-    """
 
     test_doc = """
+    #!colored:=(color:black, text:'')->{
+        #span['style="color:' + color + '"']{
+            #text
+        }
+    }
+    #!h1:=(text:'', color:'black')->{
+        #'h1'{
+            #colored(color, text)
+        }
+    }
+
+    #h1('这是黑色的粗体标题')
+    #---
+    '''
+    这是一段不会被解析的HTML，它可以写的很长很长 <br>
+
+    而且可以加入任何的特殊字符，比如：#{}[]()等等 <br>
+    '''
+    #span['style="background-color:lightblue"']{
+        '这是一段背景色为浅蓝色的文字'
+    }
+    #n // 换行
+
+    /* 这是一段注释，不会被解析 */
     #!object := (
         A:1,
         B:(
@@ -60,14 +38,21 @@ def test():
         ),
         method1:(
             a:1,
-            b:2
+            b:2,
+            c:(
+                (1, 2, 3),
+                (4, 5, 6),
+                (7, 8, 9)
+            )
         )->{
-            #a + b
+            #a + b #n // 传入参数和表达式计算
+            #c #n // 默认参数
+            #object.B.C // 动态作用域引用父级变量
         }
     
     )
 
-    #object.method1(1, 2)
+    #colored(object.method1(a:"原神", b:"启动"), color:'red')
 
     """
 

@@ -512,6 +512,8 @@ class PairDocMemberAccess:
             args_node, args_offset = node_matcher.match(args, 0)
             if not args_node or args_offset != len(args):
                 return None, 0
+            if args_node.node_type != PairDocASTNodeTypes.TUPLE:
+                args_node = PairDocASTNode(PairDocASTNodeTypes.TUPLE, [args_node]) # 单个参数的情况
             right_node = args_node
         else:  # access_type == '.'
             # 处理属性访问
